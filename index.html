@@ -1179,7 +1179,12 @@ body{background:#01030A;padding:0;justify-content:center}
    ese bloque se derramaba ENCIMA de las respuestas y las dos cosas quedaban
    ilegibles a la vez. Pasa con los feedbacks largos, que son párrafos enteros.
    Con `auto` se queda adentro y se desplaza. */
-#escena.duelo #pcuerpo{max-height:calc(var(--escH) - 340px);
+/* El `max()` no es adorno: en un celular `--escH` es 244 y la resta daba -96,
+   que CSS recorta a CERO. Con el techo en cero no se ve una sola letra y el
+   paginador parte cada linea en una pagina por palabra — 24 paginas para una
+   frase. Solo pasaba abajo de ~544 px de ancho, que es justo donde nadie lo
+   probo. El piso son cuatro renglones; lo que no entra se desplaza. */
+#escena.duelo #pcuerpo{max-height:max(6.5em, calc(var(--escH) - 340px));
   overflow-y:auto;overscroll-behavior:contain;
   scrollbar-width:thin;scrollbar-color:rgba(232,228,217,.34) transparent}
 #escena.duelo #pcuerpo::-webkit-scrollbar{width:8px}
@@ -4006,8 +4011,15 @@ function cajaCuerpo(){
   // caja todavia esta vacia: midiendo el alto de ese momento daba casi cero y
   // el texto salia partido en paginas de una palabra.
   const techo = parseFloat(cs.maxHeight);
-  const alto  = (isFinite(techo) ? techo : elCuerpo.clientHeight)
+  let alto    = (isFinite(techo) ? techo : elCuerpo.clientHeight)
               - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+  // Piso de seguridad. Si el techo llegara a dar cero o casi —una resta de CSS
+  // que se va a negativo en una pantalla angosta fue exactamente lo que paso—
+  // el paginador parte cada texto en una pagina por palabra y ademas no se ve
+  // nada. Antes que eso: tres renglones como minimo y que el cuerpo se
+  // desplace, que para eso tiene overflow propio.
+  const minimo = 3 * (parseFloat(cs.lineHeight) || 24);
+  if (!(alto > minimo)) alto = minimo;
   return {
     ancho: elCuerpo.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
     alto:  alto
