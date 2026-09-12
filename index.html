@@ -4079,6 +4079,17 @@ function delta(tag){
 
 /* Los bloques de primer nivel: cada <p>, <h2>, <div>. Se corta acá primero
    porque los párrafos vienen pegados, sin espacio entre </p> y <p>. */
+/* Las etiquetas que SON un bloque. El resto —<b>, <i>, <span>, <button>— es
+   texto corrido por más que esté a profundidad cero.
+
+   Una tabla y no una expresion regular: aca se compara el nombre entero de una
+   etiqueta de CIERRE, que no lleva atributos, asi que no hace falta ninguna
+   frontera de palabra. En el regex se me escapo un backslash y quedo un
+   backspace literal adentro, que no casa con nada: `bloques()` devolvia todo
+   junto y no fallaba: solo paginaba peor, en silencio. */
+const DE_BLOQUE = { p:1, div:1, h1:1, h2:1, h3:1, h4:1, h5:1, h6:1,
+                    ul:1, ol:1, li:1, blockquote:1, section:1, figure:1 };
+
 function bloques(html){
   const out = [];
   let prof = 0, ini = 0;
@@ -4086,8 +4097,30 @@ function bloques(html){
     if (html[i] !== '<') continue;
     const fin = html.indexOf('>', i);
     if (fin < 0) break;
-    prof += delta(html.slice(i + 1, fin));
-    if (prof === 0 && html.slice(ini, fin + 1).trim()){
+    const tag = html.slice(i + 1, fin);
+    prof += delta(tag);
+    /* Cierra bloque solo el CIERRE de una etiqueta de bloque. Antes cerraba
+       cualquiera que devolviera la profundidad a cero, y el rótulo del genio
+       —que es un <b> con fondo, lo primero de la línea— contaba como un bloque
+       suelto. Si el resto de la línea no entraba junto con él, el rótulo se iba
+       SOLO a una página: «Genio:» y nada más, y el jugador apretaba Seguir sin
+       leer nada. En un celular eso era la primera página de casi todos los
+       diálogos. Lo mismo le pasaba al <b class="fuerte"> que abre los casos
+       del piso I.
+
+       Medido con docs/auditoria-paginado.js sobre los 531 textos del juego:
+       37 huérfanas a 375 px, 30 a 390, 5 a 1024 y 4 a 1366. Con este arreglo
+       y el del prefijo en `partirBloque`, cero en los cuatro anchos, sin un
+       solo desborde nuevo. */
+    const nom = tag.replace(/^\//, '').trim().toLowerCase().split(/[\s\/]/)[0];
+    /* El <br> a profundidad cero SI es un corte, y esto no es una excepcion
+       caprichosa: los feedbacks largos separan parrafos con <br><br>, no con
+       <p>. Sacandolo, el bloque entero quedaba sin puntos de corte —`oracionesDe`
+       no ve el final de oracion en «es.<br><br><i>(Cincuenta», porque no hay
+       espacio despues del punto— y la ultima pagina se iba 22 px por encima de
+       la caja, empezando ademas a mitad de palabra. */
+    const cierraBloque = (tag[0] === '/') ? !!DE_BLOQUE[nom] : (nom === 'br');
+    if (prof === 0 && cierraBloque && html.slice(ini, fin + 1).trim()){
       out.push(html.slice(ini, fin + 1)); ini = fin + 1;
     }
     i = fin;
@@ -4168,11 +4201,32 @@ function partirBloque(bloque, alto, prefijo){
 
   // `prefijo` es lo que ya venía en la página (por ejemplo el título de la
   // ronda): entra con el primer trozo, así no queda un «RONDA 3» solo.
+  //
+  // Y si el primer trozo no entra junto con el prefijo, se lo parte por
+  // palabras contra el alto que queda, en vez de mandar el prefijo solo a una
+  // página. Antes se iba solo, y en un celular eso es una pantalla entera que
+  // dice «Ronda 2» y nada más: cuarenta de esas contaba la auditoría a 390 px.
+  // La regla de fondo es la misma de siempre — ninguna página sin texto — y el
+  // «preferible un título suelto a texto recortado» que decía acá no era una
+  // disyuntiva real: partiendo por palabras no se recorta nada.
+  let pre = prefijo || '';
+  if (pre && partes.length && medir(pre + abre + partes[0] + cierra) > alto){
+    const cabeza = [];
+    let acc = '';
+    palabrasDe(partes[0]).forEach(w => {
+      if (acc && medir(pre + abre + acc + w + cierra) > alto){ cabeza.push(acc); acc = w; }
+      else acc += w;
+    });
+    if (acc.trim()) cabeza.push(acc);
+    // Si ni la primera palabra entra con el prefijo, no hay nada que hacer y
+    // el prefijo se va solo, como antes.
+    if (cabeza.length) partes.splice.apply(partes, [0, 1].concat(cabeza));
+  }
+
   const pags = [];
-  let act = '', pre = prefijo || '';
+  let act = '';
   partes.forEach(t => {
-    // El prefijo (el título de la ronda) puede no entrar junto con el primer
-    // trozo. Ahí se va solo: preferible un título suelto a texto recortado.
+    // Si ni así entra, el prefijo se va solo: es el último recurso.
     if (!act && pre && medir(pre + abre + t + cierra) > alto){ pags.push(pre); pre = ''; }
     if (act && medir(pre + abre + act + t + cierra) > alto){
       pags.push(pre + abre + act + cierra); pre = ''; act = t;
