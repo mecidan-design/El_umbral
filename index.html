@@ -1277,6 +1277,38 @@ h2.rot{border:0;border-image:none;background:none;padding:0;
     letter-spacing:.02em;min-height:44px}
   #escena.genio #panel{padding-right:0}
   #genio{z-index:3}
+
+  /* ---------- el duelo toma la pantalla ----------
+     En un telefono la escena mide 244 px de alto y el duelo vivia adentro: el
+     texto y las cinco respuestas se repartian 202 px utiles, y las respuestas
+     quedaban en una franja de 80 px que se desplazaba — entraban dos de cinco.
+     Y arriba y abajo del marco sobraban 302 px de negro, porque va centrado.
+
+     En duelo el marco deja de ir centrado y se estira, la tira de instrumentos
+     baja al pie —y sigue a mano, que el Cuaderno se consulta justo en mitad de
+     un duelo— y el panel se despega de la escena para tomar todo lo demas.
+
+     Va con `:has()`. Si el navegador no lo tiene, no se rompe nada: el duelo
+     se queda adentro de la escena, que es como estaba hasta hoy. */
+  body:has(#escena.duelo){align-items:stretch}
+  #marco:has(#escena.duelo){min-height:100vh}
+  #marco:has(#escena.duelo) #franja{margin-top:auto}
+  #escena.duelo #panel{position:fixed;left:0;right:0;top:0;
+    bottom:var(--franjaH, 120px);height:auto;z-index:10;
+    padding:clamp(14px,2.4vh,26px) 16px}
+  /* `vh` y no `%`: el paginador lee este techo con getComputedStyle, y un
+     porcentaje le llegaria sin resolver. */
+  #escena.duelo #pcuerpo{max-height:24vh}
+  /* Dos pixeles de relleno por respuesta y uno de separacion: veinticuatro en
+     total, que es justo lo que faltaba para que la quinta entre entera en vez
+     de asomar. Siguen midiendo 56 px de alto, bien arriba de los 44 del dedo. */
+  #escena.duelo .ops{gap:5px}
+  #escena.duelo .ops button{padding:7px 11px}
+  /* El control de sonido va `fixed` arriba a la derecha y con el panel
+     empezando en el borde de arriba le quedaba encima a la primera linea del
+     genio. Baja a la esquina de abajo, que en la tira esta vacia —el Menu va
+     centrado—, y sigue a un dedo de distancia. Solo durante el duelo. */
+  body:has(#escena.duelo) #sonido{top:auto;bottom:10px}
 }
 </style>
 
@@ -4767,6 +4799,7 @@ function duelo(cfg){
     // v5: una conversación con opciones abre la pantalla de lectura entera.
     // Lo demás —narrar, examinar— se lee en la barra, sin tapar el dibujo.
     esc.classList.add('duelo');
+    medirFranja();   // la tira ya esta en su alto de partida
     const ul = document.createElement('ul');
     ul.className = 'ops';
     // `i` sigue siendo el índice en el dato: el feedback no se entera de que la
@@ -5794,6 +5827,21 @@ const PREFIERE_NITIDO = 0.88;
 
    EL ANCHO DEL MARCO NO CAMBIA NUNCA: lo fija la sala entera. Si cambiara, el
    juego se correría de lugar en la pantalla cada vez que alguien habla. */
+/* El alto de la tira de instrumentos, publicado para la hoja de estilo: en
+   celular el duelo toma la pantalla entera y tiene que terminar justo arriba
+   de ella, que sigue a mano.
+
+   Se vuelve a medir en cada duelo y no una sola vez al arrancar, porque la
+   tira CRECE durante la partida: en la portada el terreno esta oculto y mide
+   118 px; con la cordura y la barra del genio en pantalla mide 169. Medido una
+   sola vez, el panel del duelo se le montaba encima 51 px y se comia la ultima
+   respuesta. Un ResizeObserver seria lo natural, pero no dispara cuando la
+   pagina no compone cuadros y eso lo vuelve imposible de verificar. */
+function medirFranja(){
+  const frj = $('#franja');
+  if (frj) document.documentElement.style.setProperty('--franjaH', frj.offsetHeight + 'px');
+}
+
 function escalar(){
   const raiz = document.documentElement, marco = $('#marco');
   marco.classList.remove('suave');
@@ -5803,6 +5851,7 @@ function escalar(){
     marco.classList.add('suave');
     raiz.style.setProperty('--escW', W + 'px');
     raiz.style.setProperty('--escH', Math.round(W / 1.6) + 'px');
+    medirFranja();
     return;
   }
 
@@ -5842,6 +5891,8 @@ window.addEventListener('orientationchange', alRedimensionar);
 elPlegar.addEventListener('click', () => plegarPanel(!E.plegado));
 escalar();
 ubicarPanel();
+
+medirFranja();
 
 $('#bHist').addEventListener('click', () => verHistorial());
 $('#bCuad').addEventListener('click', () => verCuaderno());
