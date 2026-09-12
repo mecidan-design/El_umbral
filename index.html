@@ -1268,6 +1268,31 @@ h2.rot{border:0;border-image:none;background:none;padding:0;
   #lateral{flex-wrap:wrap;row-gap:4px;gap:10px;justify-content:center}
   #cordura h2.rot,#terreno h2.rot{font-size:12px;letter-spacing:.12em}
   #panel{height:max(170px, calc(var(--escH) * .42));padding:14px 14px 10px}
+  /* Y puede crecer. Los botones de anotar llevan la certeza ENTERA adentro
+     —«Anotar: «Dos más tres son cinco. Esto lo sé dormido, despierto, engañado
+     o cuerdo.»»— y a 390 px eso son tres renglones de botón. Con el alto
+     clavado en 170, «Volver» caía 52 px por debajo del borde de la escena y lo
+     recortaba su overflow: no se veía y no se podía tocar. En escritorio no
+     pasa —la barra mide 227 y sobran 14 px—, así que es de celular y va acá.
+
+     El alto fijo sigue siendo el piso, que es lo que evita que el dibujo salte
+     entre un examinar de una línea y una página de narración. Lo que se levanta
+     es el techo, y solo hasta el borde de la escena; si aun así no entra, las
+     acciones se desplazan en vez de recortarse. */
+  #panel{height:auto;min-height:max(170px, calc(var(--escH) * .42));max-height:100%}
+
+  /* Y si ni creciendo entra —a 375 px el mismo botón son cuatro renglones— se
+     achica el TEXTO y no los botones. `#pacciones` es `flex:1` con `min-height:0`,
+     o sea que se encogía por debajo de su contenido y lo que sobraba lo
+     recortaba la escena; con `min-height:auto` ya no puede, y el que cede es el
+     cuerpo, que se desplaza.
+
+     El orden de prioridades es ese a propósito: el texto el jugador ya lo leyó
+     —viene de apretar Seguir— y si se corta lo puede desplazar; un botón que no
+     se ve no existe. En el caso normal no cambia nada: no hay de dónde achicar,
+     así que nada se achica y los botones siguen al pie de la barra. */
+  #pacciones{min-height:auto}
+  #pcuerpo{flex:0 1 auto;min-height:3.2em;overflow-y:auto;overscroll-behavior:contain}
   #pcuerpo{max-height:calc(max(170px, var(--escH) * .42) - 92px);font-size:17px}
   #examen{display:none}
   /* Sin estirarse: con `flex:1` el que quedaba solo en la segunda fila se hacía
@@ -1290,10 +1315,12 @@ h2.rot{border:0;border-image:none;background:none;padding:0;
 
      Va con `:has()`. Si el navegador no lo tiene, no se rompe nada: el duelo
      se queda adentro de la escena, que es como estaba hasta hoy. */
-  body:has(#escena.duelo){align-items:stretch}
-  #marco:has(#escena.duelo){min-height:100vh}
-  #marco:has(#escena.duelo) #franja{margin-top:auto}
-  #escena.duelo #panel{position:fixed;left:0;right:0;top:0;
+  body:has(#escena.duelo), body:has(#escena.lectura){align-items:stretch}
+  #marco:has(#escena.duelo), #marco:has(#escena.lectura){min-height:100vh}
+  #marco:has(#escena.duelo) #franja,
+  #marco:has(#escena.lectura) #franja{margin-top:auto}
+  #escena.duelo #panel,
+  #escena.lectura #panel{position:fixed;left:0;right:0;top:0;
     bottom:var(--franjaH, 120px);height:auto;z-index:10;
     padding:clamp(14px,2.4vh,26px) 16px}
   /* `vh` y no `%`: el paginador lee este techo con getComputedStyle, y un
@@ -1308,7 +1335,8 @@ h2.rot{border:0;border-image:none;background:none;padding:0;
      empezando en el borde de arriba le quedaba encima a la primera linea del
      genio. Baja a la esquina de abajo, que en la tira esta vacia —el Menu va
      centrado—, y sigue a un dedo de distancia. Solo durante el duelo. */
-  body:has(#escena.duelo) #sonido{top:auto;bottom:10px}
+  body:has(#escena.duelo) #sonido,
+  body:has(#escena.lectura) #sonido{top:auto;bottom:10px}
 }
 </style>
 
@@ -3973,6 +4001,9 @@ function render(p){
 }
 
 function escribir(html){
+  // Cada texto arranca en la barra. Si sus botones no entran, `botonera` la
+  // vuelve a abrir; asi la pantalla de lectura no puede quedarse prendida.
+  esc.classList.remove('lectura');
   elPanel.classList.add('on');
   elCuerpo.innerHTML = html;
 }
@@ -3984,6 +4015,7 @@ function limpiarAcciones(){ elAcciones.innerHTML = ''; }
    botones se borran además de esconderse: si quedan en el DOM siguen siendo
    activables, y un clic ahí adelanta el guion dos veces. */
 function apartarPanel(){
+  esc.classList.remove('lectura');
   elPanel.classList.remove('on');
   acciones('');
 }
@@ -4024,6 +4056,24 @@ function botonera(botones, indicador){
   });
   if (indicador) c.insertAdjacentHTML('beforeend', '<span class="pag">' + indicador + '</span>');
   elAcciones.appendChild(c);
+  /* Si la fila de acciones no entra en la barra, se abre la pantalla de
+     lectura: la misma de los duelos, que ya tiene la pantalla entera.
+
+     Pasa con los botones de anotar, que llevan la certeza ENTERA adentro. El
+     fuego y el sillon del piso I ofrecen DOS a la vez —una verdadera y una
+     falsa— y a 375 px son dos botones de cuatro renglones cada uno: el
+     `Volver` quedaba 43 px por debajo del borde de la escena, recortado. No
+     alcanzaba con dejar crecer la barra ni con achicarle el texto.
+
+     Solo en celular: en escritorio la barra mide 227 px y sobran 14. */
+  if (chico && chico.matches && !esc.classList.contains('duelo')){
+    const fondo = esc.getBoundingClientRect().bottom;
+    if (c.getBoundingClientRect().bottom > fondo + 1){
+      medirFranja();
+      esc.classList.add('lectura');
+    }
+  }
+
   const primero = c.querySelector('button');
   if (primero) primero.focus({ preventScroll:true });
 }
@@ -4362,6 +4412,7 @@ function alRedimensionar(){
 function correr(guion){ E.guion = guion.slice(); E.i = 0; E.modo = 'narracion'; paso(); }
 
 function cerrarPanel(){
+  esc.classList.remove('lectura');
   E.guion = null; E.modo = null;
   cerrarLamina();
   elPanel.classList.remove('on');
@@ -5927,6 +5978,10 @@ const PREFIERE_NITIDO = 0.88;
    sola vez, el panel del duelo se le montaba encima 51 px y se comia la ultima
    respuesta. Un ResizeObserver seria lo natural, pero no dispara cuando la
    pagina no compone cuadros y eso lo vuelve imposible de verificar. */
+/* El mismo umbral de 720 que usan la hoja de estilo y `escalar()`, en un solo
+   lugar. Lo consulta `botonera()` para decidir si abre la pantalla de lectura. */
+const chico = window.matchMedia('(max-width:720px)');
+
 function medirFranja(){
   const frj = $('#franja');
   if (frj) document.documentElement.style.setProperty('--franjaH', frj.offsetHeight + 'px');
