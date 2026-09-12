@@ -5610,6 +5610,45 @@ const Sonido = (function(){
      El juego nunca depende de la música para poder jugarse. */
   const pidiendo = {};   // pistas ya pedidas que todavía no llegaron
 
+  /* Safari NO decodifica Ogg/Opus por Web Audio, ni en Mac ni en iPhone, y el
+     envase web existe justamente para el celular del alumno. Así que en ese
+     envase cada pista viaja dos veces: en Ogg/Opus, que es la buena, y en AAC
+     dentro de un .m4a, que la decodifica todo el mundo.
+
+     Cuál usar no se adivina mirando el navegador —eso envejece mal y miente—
+     sino que se PRUEBA una vez por sesión, con los 198 bytes de Opus en
+     silencio de acá abajo. Si decodifican, va Ogg; si no, se le cambia la
+     extensión a todas y va AAC. Cuesta un `decodeAudioData` y ninguna descarga.
+
+     Las dos versiones decodifican a la MISMA cantidad de muestras —medido:
+     3.407.888 en la portada, y las dos arrancan en la muestra cero— porque el
+     .m4a lleva la lista de edición que descuenta el retardo del codificador. O
+     sea que el bucle sigue empalmando sin costura y no hay nada que compensar.
+     Si alguna vez se reencodea, verificar eso primero: es lo único que hace
+     que el plan B sea aceptable y no se nota hasta el segundo bucle. */
+  const SONDA = 'data:audio/ogg;base64,' + 'T2dnUwACAAAAAAAAAADTlCnWAAAAAB1l2a0BE09wdXNIZWFkAQE4AYC7AAAAAABPZ2dTAAAAAAAAAAAAANOUKdYBAAAAJZwxlQE8T3B1c1RhZ3MMAAAATGF2ZjYzLjEuMTAxAQAAABwAAABlbmNvZGVyPUxhdmM2My4xLjEwMSBsaWJvcHVzT2dnUwAEOBAAAAAAAADTlCnWAgAAAJZTJosFBwYGBgYIC+Y7I6tgCAissw7GCAissw7GCAissw7GCAissw7G';
+  let formato = null;    // 'ogg' | 'm4a', una vez por sesión
+  let sondeo = null;
+
+  function resolverFormato(){
+    if (formato) return Promise.resolve(formato);
+    if (sondeo) return sondeo;
+    return (sondeo = new Promise(function(listo){
+      if (!ctx) return listo(formato = 'ogg');
+      let b;
+      try {
+        const crudo = atob(SONDA.slice(SONDA.indexOf(',') + 1));
+        b = new Uint8Array(crudo.length);
+        for (let i = 0; i < crudo.length; i++) b[i] = crudo.charCodeAt(i);
+      } catch (e){ return listo(formato = 'ogg'); }
+      try {
+        ctx.decodeAudioData(b.buffer,
+          function(){ listo(formato = 'ogg'); },
+          function(){ listo(formato = 'm4a'); });
+      } catch (e){ listo(formato = 'm4a'); }
+    }));
+  }
+
   function decodificar(k, luego){
     if (buffers[k]) return luego(buffers[k]);
     if (pidiendo[k]) return void pidiendo[k].push(luego);
@@ -5626,9 +5665,13 @@ const Sonido = (function(){
       } catch (e){ delete pidiendo[k]; return; }
       return aPCM(k, bytes.buffer);
     }
-    fetch(uri).then(function(r){ return r.ok ? r.arrayBuffer() : null; })
-              .then(function(ab){ if (ab) aPCM(k, ab); else delete pidiendo[k]; })
-              .catch(function(){ delete pidiendo[k]; });
+    resolverFormato()
+      .then(function(f){
+        return fetch(f === 'ogg' ? uri : uri.replace(/\.ogg$/i, '.m4a'));
+      })
+      .then(function(r){ return r.ok ? r.arrayBuffer() : null; })
+      .then(function(ab){ if (ab) aPCM(k, ab); else delete pidiendo[k]; })
+      .catch(function(){ delete pidiendo[k]; });
   }
 
   /* La cola y no un solo `luego`: entre que se pide una pista y que llega hay
