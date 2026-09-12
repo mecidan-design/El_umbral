@@ -5771,6 +5771,19 @@ const Sonido = (function(){
   return {
     arrancar: arrancar,
 
+    /* Volver de un contexto suspendido. Pasa mas de lo que parece: iOS lo
+       suspende cuando entra una llamada o se cambia de pestana, y sobre todo lo
+       deja suspendido de entrada si el contexto se creo sin un gesto que Safari
+       acepte. Sin esto, esa primera vez no tenia arreglo. */
+    despertar: function(){
+      if (!ctx || !ctx.resume) return;
+      if (ctx.state !== 'suspended') return;
+      const vuelta = ctx.resume();
+      const seguir = function(){ if (!actual && clave) encender(); };
+      if (vuelta && vuelta.then) vuelta.then(seguir, function(){});
+      else seguir();
+    },
+
     pista: poner,
     piso: function(P){ poner(P && P.pista ? P.pista : null); },
 
@@ -5863,10 +5876,28 @@ const Sonido = (function(){
   };
 })();
 
-/* El primer clic del jugador, el que sea: los navegadores no dejan sonar nada
-   antes de eso, y con razón. */
-document.addEventListener('pointerdown', () => Sonido.arrancar(), { once:true });
-document.addEventListener('keydown',     () => Sonido.arrancar(), { once:true });
+/* El primer gesto del jugador, el que sea: los navegadores no dejan sonar nada
+   antes de eso, y con razón.
+
+   Acá había un bug que dejó al juego MUDO en iPhone desde siempre, y que no se
+   ve leyendo porque en escritorio funciona: esto escuchaba `pointerdown` y con
+   `{once:true}`. Safari NO cuenta el pointerdown —ni el touchstart— como gesto
+   que habilite el audio: podría ser el comienzo de un scroll, así que se guarda
+   para el `click` o el `touchend`. El AudioContext nacía suspendido, el único
+   intento se gastaba ahí, y no había segunda oportunidad.
+
+   Ahora: `click` y `touchend`, que Safari sí acepta; sin `{once:true}`, porque
+   el contexto se puede volver a suspender —una llamada entrante, cambiar de
+   pestaña— y conviene que los oyentes sigan ahí; y cada gesto no solo crea el
+   contexto sino que lo DESPIERTA si quedó suspendido, que es lo que rescata el
+   caso de arriba. Todos son no-ops una vez que suena. */
+function gestoDeSonido(){
+  Sonido.arrancar();
+  Sonido.despertar();
+}
+['pointerdown', 'click', 'touchend', 'keydown'].forEach(function(ev){
+  document.addEventListener(ev, gestoDeSonido, true);
+});
 
 /* --- 3.15 ter El control de sonido ---------------------------------------
    Uno solo y siempre a la vista, la portada incluida: que se sepa que va a

@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="es">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Umbral — prueba de sonido</title>
+
+<!--
+  Página de diagnóstico del audio, para abrir en el teléfono cuando la música
+  del juego no suena. No es parte del juego: se puede borrar sin tocar nada.
+
+  Prueba, en este orden y todo dentro de un solo toque:
+
+    1. que exista AudioContext y en qué estado nace;
+    2. que el toque lo deje en `running` (iOS lo suspende entre gestos);
+    3. que suene un pitido generado, sin archivos de por medio — si esto no
+       suena, el problema es del navegador o del teléfono, no de los archivos;
+    4. si el navegador decodifica Ogg/Opus (Safari no);
+    5. que el .m4a se baje y se decodifique;
+    6. que esa música se escuche de verdad.
+
+  Cada paso dice qué pasó con números, no con «error». Lo que importa es la
+  primera línea roja: de ahí para abajo es consecuencia.
+-->
+
+<style>
+:root{ --noche:#0A0E1A; --hueso:#E8E4D9; --claro:#8FB4D9; --ambar:#F2C14E;
+       --verde:#7FBF7F; --rojo:#E4796B; --azul:#3E5C82; }
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:#05070C;color:var(--hueso);
+  font-family:ui-monospace,"Cascadia Mono","Consolas",monospace;
+  font-size:16px;line-height:1.5;-webkit-text-size-adjust:100%}
+body{padding:18px 16px 8px;max-width:640px;margin:0 auto;
+  display:flex;flex-direction:column;min-height:100vh}
+h1{font-size:1.2rem;letter-spacing:.12em;color:var(--ambar);
+  font-weight:400;margin:0 0 .2em;text-transform:uppercase}
+p.sub{color:var(--claro);margin:0 0 1.2em;font-size:.92em}
+button{font:inherit;color:var(--hueso);background:var(--noche);
+  border:2px solid var(--claro);padding:14px 18px;width:100%;
+  min-height:56px;cursor:pointer;letter-spacing:.08em}
+button:disabled{opacity:.45}
+#pasos{list-style:none;margin:1.4em 0 0;padding:0;font-size:.94em}
+#pasos li{padding:9px 0 9px 26px;border-bottom:1px solid #16203A;
+  text-indent:-26px}
+#pasos li::before{content:"· ";color:var(--azul);display:inline-block;width:26px;
+  text-indent:0}
+#pasos li.ok::before{content:"OK ";color:var(--verde)}
+#pasos li.mal::before{content:"NO ";color:var(--rojo)}
+#pasos li.mal{color:var(--rojo)}
+#pasos li .dato{display:block;text-indent:0;color:var(--claro);font-size:.86em;
+  margin-top:.2em}
+.pregunta{margin-top:1.4em;padding:12px 14px;border:2px solid var(--ambar)}
+.pregunta[hidden]{display:none}
+.pregunta b{color:var(--ambar);display:block;margin-bottom:.5em}
+.dos{display:flex;gap:10px;margin-top:10px}
+footer{margin-top:auto;padding-top:22px;color:var(--azul);font-size:.78em;
+  letter-spacing:.06em;text-align:center}
+</style>
+
+<h1>Prueba de sonido</h1>
+<p class="sub">Tocá el botón una vez y esperá. Sacale una captura al resultado.</p>
+
+<button id="ir" type="button">Probar el sonido</button>
+
+<ul id="pasos"></ul>
+
+<div class="pregunta" id="preg" hidden>
+  <b id="pregTxt"></b>
+  <div class="dos">
+    <button type="button" data-r="si">Sí, lo escuché</button>
+    <button type="button" data-r="no">No escuché nada</button>
+  </div>
+</div>
+
+<footer>Copyright Prof Dan M. Mecikovsky</footer>
+
+<script>
+/* 198 bytes de Opus en silencio: el mismo sondeo que usa el juego. */
+var SONDA = 'data:audio/ogg;base64,T2dnUwACAAAAAAAAAADTlCnWAAAAAB1l2a0BE09wdXNIZWFkAQE4AYC7AAAAAABPZ2dTAAAAAAAAAAAAANOUKdYBAAAAJZwxlQE8T3B1c1RhZ3MMAAAATGF2ZjYzLjEuMTAxAQAAABwAAABlbmNvZGVyPUxhdmM2My4xLjEwMSBsaWJvcHVzT2dnUwAEOBAAAAAAAADTlCnWAgAAAJZTJosFBwYGBgYIC+Y7I6tgCAissw7GCAissw7GCAissw7GCAissw7G';
+
+var pasos = document.getElementById('pasos');
+var preg  = document.getElementById('preg');
+var pregTxt = document.getElementById('pregTxt');
+var ir = document.getElementById('ir');
+var responder = null;
+
+function linea(txt, estado, dato){
+  var li = document.createElement('li');
+  li.textContent = txt;
+  if (estado) li.className = estado;
+  if (dato){
+    var s = document.createElement('span');
+    s.className = 'dato';
+    s.textContent = dato;
+    li.appendChild(s);
+  }
+  pasos.appendChild(li);
+  return li;
+}
+
+function preguntar(txt){
+  pregTxt.textContent = txt;
+  preg.hidden = false;
+  return new Promise(function(listo){ responder = listo; });
+}
+
+preg.addEventListener('click', function(e){
+  var b = e.target.closest('button');
+  if (!b || !responder) return;
+  preg.hidden = true;
+  var f = responder; responder = null;
+  f(b.dataset.r === 'si');
+});
+
+function aBytes(b64){
+  var crudo = atob(b64.slice(b64.indexOf(',') + 1));
+  var u = new Uint8Array(crudo.length);
+  for (var i = 0; i < crudo.length; i++) u[i] = crudo.charCodeAt(i);
+  return u.buffer;
+}
+
+function decodificar(ctx, ab){
+  return new Promise(function(ok, no){
+    try { ctx.decodeAudioData(ab, ok, function(e){ no(e || new Error('no decodifica')); }); }
+    catch (e){ no(e); }
+  });
+}
+
+function sonar(ctx, buf, seg){
+  return new Promise(function(listo){
+    var g = ctx.createGain();
+    g.gain.value = 0.9;
+    g.connect(ctx.destination);
+    var f = ctx.createBufferSource();
+    f.buffer = buf;
+    f.connect(g);
+    f.start();
+    setTimeout(function(){ try { f.stop(); } catch (e){} listo(); }, seg * 1000);
+  });
+}
+
+ir.addEventListener('click', async function(){
+  ir.disabled = true;
+  pasos.innerHTML = '';
+
+  linea('Navegador', '', navigator.userAgent);
+
+  var AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC){ linea('AudioContext', 'mal', 'este navegador no lo tiene'); return; }
+
+  var ctx = new AC();
+  linea('AudioContext creado', 'ok', 'estado al nacer: ' + ctx.state +
+        ' · ' + ctx.sampleRate + ' Hz');
+
+  if (ctx.state === 'suspended' && ctx.resume){
+    try { await ctx.resume(); } catch (e){}
+  }
+  linea('Estado después del toque', ctx.state === 'running' ? 'ok' : 'mal',
+        ctx.state + (ctx.state === 'running' ? '' :
+        ' — el navegador no habilita el audio con este gesto'));
+
+  /* Un pitido sin archivos: separa «no suena nada» de «no se decodifica». */
+  var osc = ctx.createOscillator(), og = ctx.createGain();
+  osc.frequency.value = 440;
+  og.gain.value = 0.25;
+  osc.connect(og); og.connect(ctx.destination);
+  osc.start();
+  setTimeout(function(){ try { osc.stop(); } catch (e){} }, 700);
+  linea('Pitido de prueba', '', 'generado, 440 Hz, medio segundo');
+  var oyoPitido = await preguntar('¿Escuchaste un pitido?');
+  linea('¿Se escuchó el pitido?', oyoPitido ? 'ok' : 'mal',
+        oyoPitido ? 'el teléfono reproduce audio web'
+                  : 'ni un tono generado se escucha: mirá el volumen y, en iPhone, el interruptor lateral de silencio');
+
+  var formato = 'm4a';
+  try {
+    await decodificar(ctx, aBytes(SONDA));
+    formato = 'ogg';
+    linea('¿Decodifica Ogg/Opus?', 'ok', 'sí — usaría los .ogg');
+  } catch (e){
+    linea('¿Decodifica Ogg/Opus?', '', 'no — usaría los .m4a (esperado en Safari)');
+  }
+
+  var url = 'audio/portada.' + formato;
+  var ab = null;
+  try {
+    var r = await fetch(url);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    ab = await r.arrayBuffer();
+    linea('Descarga de ' + url, 'ok', ab.byteLength + ' bytes');
+  } catch (e){
+    linea('Descarga de ' + url, 'mal', String(e));
+    return;
+  }
+
+  var buf = null;
+  try {
+    buf = await decodificar(ctx, ab);
+    linea('Decodificación de la pista', 'ok',
+          buf.numberOfChannels + ' canal · ' + buf.length + ' muestras · ' +
+          buf.duration.toFixed(2) + ' s');
+  } catch (e){
+    linea('Decodificación de la pista', 'mal', String(e && e.message || e));
+    return;
+  }
+
+  linea('Reproduciendo la música', '', 'cuatro segundos');
+  await sonar(ctx, buf, 4);
+  var oyoMusica = await preguntar('¿Escuchaste la música?');
+  linea('¿Se escuchó la música?', oyoMusica ? 'ok' : 'mal',
+        oyoMusica ? 'el audio del juego funciona en este teléfono'
+                  : 'se decodificó pero no se oye');
+
+  linea('Fin', '', 'mandale esta captura a Dan');
+  ir.disabled = false;
+  ir.textContent = 'Probar de nuevo';
+});
+</script>
+</html>
